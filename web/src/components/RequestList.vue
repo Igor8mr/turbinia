@@ -105,6 +105,7 @@ export default {
       headers: [
         { text: 'Request', value: 'request_id_reason' },
         { text: 'Last Task Update Time', value: 'last_task_update_time' },
+        { text: 'Evidence Name', value: 'evidence_name' },
         { text: 'Requester', value: 'requester' },
         { text: 'Total Tasks', value: 'total_tasks' },
         { text: 'Running Tasks', value: 'running_tasks' },
@@ -137,6 +138,8 @@ export default {
               failed_tasks: data[req].failed_tasks,
               outstanding_perc: outstanding_perc,
               status: data[req].status,
+              evidence_name: data[req].evidence_name,
+              evidence_id: data[req].evidence_id,
             })
           }
           this.requestSummary = requestSummary
@@ -151,7 +154,7 @@ export default {
           const downloadObj = window.URL.createObjectURL(new Blob([data]))
           const link = document.createElement('a')
           link.href = downloadObj
-          link.setAttribute('download', request_id + '.zip')
+          link.setAttribute('download', request_id + '.tgz')
           document.body.appendChild(link)
           link.click()
           link.remove()

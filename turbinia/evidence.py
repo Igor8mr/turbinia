@@ -18,13 +18,16 @@ from __future__ import unicode_literals
 
 from enum import IntEnum
 from collections import defaultdict
+from typing import Any
 
+import filelock
+import inspect
 import json
 import logging
 import os
+import subprocess
 import sys
-import inspect
-import filelock
+import uuid
 
 from turbinia import config
 from turbinia import TurbiniaException
@@ -33,6 +36,8 @@ from turbinia.processors import containerd
 from turbinia.processors import docker
 from turbinia.processors import mount_local
 from turbinia.processors import resource_manager
+from turbinia.config import DATETIME_FORMAT
+from datetime import datetime
 
 config.LoadConfig()
 if config.CLOUD_PROVIDER.lower() == 'gcp':
@@ -121,14 +126,13 @@ def evidence_decode(evidence_dict, strict=False):
   """
   if not isinstance(evidence_dict, dict):
     raise TurbiniaException(
-        'Evidence_dict is not a dictionary, type is {0:s}'.format(
-            str(type(evidence_dict))))
+        f'Evidence_dict is not a dictionary, type is {str(type(evidence_dict)):s}'
+    )
   type_ = evidence_dict.pop('type', None)
   name_ = evidence_dict.pop('_name', None)
   if not type_:
     raise TurbiniaException(
-        'No Type attribute for evidence object [{0:s}]'.format(
-            str(evidence_dict)))
+        f'No Type attribute for evidence object [{str(evidence_dict):s}]')
   evidence = None
   try:
     evidence_class = getattr(sys.modules[__name__], type_)
@@ -137,8 +141,7 @@ def evidence_decode(evidence_dict, strict=False):
     if strict and evidence_object:
       for attribute_key in evidence_dict.keys():
         if not attribute_key in evidence_object.__dict__:
-          message = 'Invalid attribute {0!s} for evidence type {1:s}'.format(
-              attribute_key, type_)
+          message = f'Invalid attribute {attribute_key!s} for evidence type {type_:s}'
           log.error(message)
           raise TurbiniaException(message)
     if evidence:
@@ -155,8 +158,7 @@ def evidence_decode(evidence_dict, strict=False):
       for state in EvidenceState:
         evidence.state[state] = False
   except AttributeError:
-    message = 'No Evidence object of type {0!s} in evidence module'.format(
-        type_)
+    message = f'No Evidence object of type {type_!s} in evidence module'
     log.error(message)
     raise TurbiniaException(message) from AttributeError
 
@@ -245,7 +247,7 @@ class Evidence:
   """
 
   # The list of attributes a given piece of Evidence requires to be set
-  REQUIRED_ATTRIBUTES = []
+  REQUIRED_ATTRIBUTES = ['id']
 
   # An optional set of attributes that are generally used to describe
   # a given piece of Evidence.
@@ -258,13 +260,18 @@ class Evidence:
 
   def __init__(self, *args, **kwargs):
     """Initialization for Evidence."""
+    self.id = kwargs.get('id', uuid.uuid4().hex)
     self.cloud_only = kwargs.get('cloud_only', False)
     self.config = kwargs.get('config', {})
     self.context_dependent = kwargs.get('context_dependent', False)
     self.copyable = kwargs.get('copyable', False)
+    self.creation_time = kwargs.get(
+        'creation_time',
+        datetime.now().strftime(DATETIME_FORMAT))
     self.credentials = kwargs.get('credentials', [])
     self.description = kwargs.get('description', None)
     self.has_child_evidence = kwargs.get('has_child_evidence', False)
+    self.hash = kwargs.get('hash', None)
     self.mount_path = kwargs.get('mount_path', None)
     self._name = kwargs.get('name')
     self.parent_evidence = kwargs.get('parent_evidence', None)
@@ -280,6 +287,7 @@ class Evidence:
     self.source = kwargs.get('source', None)
     self.source_path = kwargs.get('source_path', None)
     self.tags = kwargs.get('tags', {})
+    self.tasks = kwargs.get('tasks', [])
     self.type = self.__class__.__name__
 
     self.local_path = self.source_path
@@ -301,10 +309,23 @@ class Evidence:
     # self.validate()
 
   def __str__(self):
-    return '{0:s}:{1:s}:{2!s}'.format(self.type, self.name, self.source_path)
+    return f'{self.type:s}:{self.name:s}:{self.source_path!s}'
 
   def __repr__(self):
     return self.__str__()
+
+  def __setattr__(self, attribute_name: str, attribute_value: Any):
+    """Sets the value of the attribute and updates last_update.
+
+    Args:
+      attribute_name (str): name of the attribute to be set.
+      attribute_value (Any): value to be set.
+    """
+    if attribute_name == 'name':
+      attribute_name = '_name'
+    self.__dict__[attribute_name] = attribute_value
+    if attribute_name != 'last_update':
+      self.last_update = datetime.now().strftime(DATETIME_FORMAT)
 
   @property
   def name(self):
@@ -313,10 +334,6 @@ class Evidence:
       return self._name
     else:
       return self.source_path if self.source_path else self.type
-
-  @name.setter
-  def name(self, value):
-    self._name = value
 
   @name.deleter
   def name(self):
@@ -344,14 +361,47 @@ class Evidence:
     new_object.__dict__.update(dictionary)
     return new_object
 
-  def serialize(self):
-    """Return JSON serializable object."""
+  def serialize_attribute(self, name: str) -> str:
+    """Returns JSON serialized attribute.
+    
+    Args:
+      name(str): the name of the attribute that will be serialized.
+    Returns:
+      A string containing the serialized attribute.
+    """
+    if hasattr(self, name):
+      try:
+        return json.dumps(getattr(self, name))
+      except (TypeError, OverflowError):
+        log.error(f'Attribute {name} in evidence {self.id} is not serializable')
+    else:
+      log.error(f'Evidence {self.id} has no attribute {name}')
+
+  def serialize(self, json_values: bool = False):
+    """Returns a JSON serialized object. The function will return A string
+    containing the serialized evidence_dict or a dict of serialized attributes
+    if json_values is true.
+    
+    Args:
+      json_values(bool): Returns only values of the dictionary as json strings
+        instead of the entire dictionary.
+
+    Returns:
+      JSON serialized object.
+    """
     # Clear any partition path_specs before serializing
     if hasattr(self, 'path_spec'):
       self.path_spec = None
-    serialized_evidence = self.__dict__.copy()
-    if self.parent_evidence:
-      serialized_evidence['parent_evidence'] = self.parent_evidence.serialize()
+    serialized_evidence = {}
+    if json_values:
+      for attribute_name in self.__dict__:
+        if serialized_attribute := self.serialize_attribute(attribute_name):
+          serialized_evidence[attribute_name] = serialized_attribute
+    else:
+      serialized_evidence = self.__dict__.copy()
+      if self.parent_evidence:
+        serialized_evidence['parent_evidence'] = self.parent_evidence.serialize(
+        )
     return serialized_evidence
 
   def to_json(self):
@@ -457,17 +507,19 @@ class Evidence:
     if not required_states:
       required_states = []
 
+    if not self.size and self.source_path:
+      self.size = mount_local.GetDiskSize(self.source_path)
+
     if self.context_dependent:
       if not self.parent_evidence:
         raise TurbiniaException(
-            'Evidence of type {0:s} needs parent_evidence to be set'.format(
-                self.type))
+            f'Evidence of type {self.type:s} needs parent_evidence to be set')
       log.debug(
           'Evidence is context dependent. Running preprocess for parent_evidence '
           '{0:s}'.format(self.parent_evidence.name))
       self.parent_evidence.preprocess(task_id, tmp_dir, required_states)
     try:
-      log.info('Starting preprocessor for evidence {0:s}'.format(self.name))
+      log.info(f'Starting preprocessor for evidence {self.name:s}')
       if self.resource_tracked:
         # Track resource and task id in state file
         log.debug(
@@ -478,13 +530,11 @@ class Evidence:
           self._preprocess(tmp_dir, required_states)
       else:
         log.debug(
-            'Evidence {0:s} is not resource tracked. Running preprocess.'
-            .format(self.name))
+            f'Evidence {self.name:s} is not resource tracked. Running preprocess.'
+        )
         self._preprocess(tmp_dir, required_states)
     except TurbiniaException as exception:
-      log.error(
-          'Error running preprocessor for {0:s}: {1!s}'.format(
-              self.name, exception))
+      log.error(f'Error running preprocessor for {self.name:s}: {exception!s}')
 
     log.info(
         'Preprocessing evidence {0:s} is complete, and evidence is in state '
@@ -500,8 +550,8 @@ class Evidence:
     Args:
       task_id(str): The id of a given Task.
     """
-    log.info('Starting postprocessor for evidence {0:s}'.format(self.name))
-    log.debug('Evidence state: {0:s}'.format(self.format_state()))
+    log.info(f'Starting postprocessor for evidence {self.name:s}')
+    log.debug(f'Evidence state: {self.format_state():s}')
 
     if self.resource_tracked:
       log.debug(
@@ -527,8 +577,8 @@ class Evidence:
             self.parent_evidence.postprocess(task_id)
     else:
       log.debug(
-          'Evidence {0:s} is not resource tracked. '
-          'Running postprocess.'.format(self.name))
+          f'Evidence {self.name:s} is not resource tracked. Running postprocess.'
+      )
       self._postprocess()
       if self.parent_evidence:
         log.debug(
@@ -545,10 +595,18 @@ class Evidence:
     """
     output = []
     for state, value in self.state.items():
-      output.append('{0:s}: {1!s}'.format(state.name, value))
-    return '[{0:s}]'.format(', '.join(output))
+      output.append(f'{state.name:s}: {value!s}')
+    return f"[{', '.join(output):s}]"
 
-  def validate(self):
+  def _validate(self):
+    """Runs additional logic to validate evidence requirements.
+    
+    Evidence subclasses can override this method to perform custom
+    validation of evidence objects.
+    """
+    pass
+
+  def validate_attributes(self):
     """Runs validation to verify evidence meets minimum requirements.
 
     This default implementation will just check that the attributes listed in
@@ -557,16 +615,32 @@ class Evidence:
     called by the worker, prior to the pre/post-processors running.
 
     Raises:
-      TurbiniaException: If validation fails
+      TurbiniaException: If validation fails, or when encountering an error.
     """
     for attribute in self.REQUIRED_ATTRIBUTES:
       attribute_value = getattr(self, attribute, None)
       if not attribute_value:
         message = (
-            'Evidence validation failed: Required attribute {0:s} for class '
-            '{1:s} is not set. Please check original request.'.format(
-                attribute, self.type))
+            f'Evidence validation failed: Required attribute {attribute} for '
+            f'evidence {getattr(self, "id", "(ID not set)")} of class '
+            f'{getattr(self, "type", "(type not set)")} is not set. Please '
+            f'check original request.')
         raise TurbiniaException(message)
+
+  def validate(self):
+    """Runs validation to verify evidence meets minimum requirements, including
+    PlasoFile evidence.
+
+    This default implementation will just check that the attributes listed in
+    REQUIRED_ATTRIBUTES are set, but other evidence types can override this
+    method to implement their own more stringent checks as needed.  This is
+    called by the worker, prior to the pre/post-processors running.
+
+    Raises:
+      TurbiniaException: If validation fails, or when encountering an error.
+    """
+    self.validate_attributes()
+    self._validate()
 
 
 class EvidenceCollection(Evidence):
@@ -693,8 +767,6 @@ class RawDisk(Evidence):
     self.device_path = None
 
   def _preprocess(self, _, required_states):
-    if self.size is None:
-      self.size = mount_local.GetDiskSize(self.source_path)
     if EvidenceState.ATTACHED in required_states or self.has_child_evidence:
       self.device_path = mount_local.PreprocessLosetup(self.source_path)
       self.state[EvidenceState.ATTACHED] = True
@@ -725,14 +797,15 @@ class DiskPartition(Evidence):
       self, partition_location=None, partition_offset=None, partition_size=None,
       lv_uuid=None, path_spec=None, important=True, *args, **kwargs):
     """Initialization for raw volume evidence object."""
+    super(DiskPartition, self).__init__(*args, **kwargs)
     self.partition_location = partition_location
     if partition_offset:
       try:
         self.partition_offset = int(partition_offset)
       except ValueError as exception:
         log.error(
-            'Unable to cast partition_offset attribute to integer. {0!s}'
-            .format(exception))
+            f'Unable to cast partition_offset attribute to integer. {exception!s}'
+        )
     else:
       self.partition_offset = None
     if partition_size:
@@ -740,14 +813,13 @@ class DiskPartition(Evidence):
         self.partition_size = int(partition_size)
       except ValueError as exception:
         log.error(
-            'Unable to cast partition_size attribute to integer. {0!s}'.format(
-                exception))
+            f'Unable to cast partition_size attribute to integer. {exception!s}'
+        )
     else:
       self.partition_size = None
     self.lv_uuid = lv_uuid
     self.path_spec = path_spec
     self.important = important
-    super(DiskPartition, self).__init__(*args, **kwargs)
 
     # This Evidence needs to have a parent
     self.context_dependent = True
@@ -788,8 +860,7 @@ class DiskPartition(Evidence):
               self.path_spec.CopyToDict(), self.parent_evidence.name))
     else:
       raise TurbiniaException(
-          'Could not find path_spec for location {0:s}'.format(
-              self.partition_location))
+          f'Could not find path_spec for location {self.partition_location:s}')
 
     # In attaching a partition, we create a new loopback device using the
     # partition offset and size.
@@ -940,8 +1011,8 @@ class GoogleCloudDiskRawEmbedded(GoogleCloudDisk):
           self.parent_evidence.mount_path, self.embedded_path)
       if not os.path.exists(rawdisk_path):
         raise TurbiniaException(
-            'Unable to find raw disk image {0:s} in GoogleCloudDisk'.format(
-                rawdisk_path))
+            f'Unable to find raw disk image {rawdisk_path:s} in GoogleCloudDisk'
+        )
       self.device_path = mount_local.PreprocessLosetup(rawdisk_path)
       self.state[EvidenceState.ATTACHED] = True
       self.local_path = self.device_path
@@ -970,6 +1041,37 @@ class PlasoFile(Evidence):
     self.save_metadata = True
     self.copyable = True
     self.plaso_version = plaso_version
+
+  def _validate(self):
+    """Validates whether the Plaso file contains any events.
+    
+    Raises:
+      TurbiniaException: if validation fails.
+    """
+    cmd = [
+        'pinfo.py',
+        '--output-format',
+        'json',
+        '--sections',
+        'events',
+        self.local_path,
+    ]
+    total_file_events = 0
+
+    try:
+      log.info(f'Running pinfo.py to validate PlasoFile {self.local_path}')
+      command = subprocess.run(cmd, capture_output=True, check=True)
+      storage_counters_json = command.stdout.decode('utf-8').strip()
+      storage_counters = json.loads(storage_counters_json)
+      total_file_events = storage_counters.get('storage_counters', {}).get(
+          'parsers', {}).get('total', 0)
+      log.info(f'pinfo.py found {total_file_events} events.')
+      if not total_file_events:
+        raise TurbiniaException(
+            'PlasoFile validation failed, pinfo.py found no events.')
+    except subprocess.CalledProcessError as exception:
+      raise TurbiniaException(
+          f'Error validating plaso file: {exception!s}') from exception
 
 
 class PlasoCsvFile(Evidence):

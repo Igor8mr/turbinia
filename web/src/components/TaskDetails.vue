@@ -53,6 +53,12 @@ limitations under the License.
           </v-list-item>
           <v-list-item>
             <v-list-item-content>
+              <v-list-item-title> Evidence ID: </v-list-item-title>
+              {{ taskDetails.evidence_id }}
+            </v-list-item-content>
+          </v-list-item>
+          <v-list-item>
+            <v-list-item-content>
               <v-list-item-title> Group ID: </v-list-item-title> {{ taskDetails.group_id }}
             </v-list-item-content>
           </v-list-item>
@@ -70,6 +76,12 @@ limitations under the License.
             <v-list-item-content>
               <v-list-item-title> Evidence Name: </v-list-item-title>
               {{ taskDetails.evidence_name }}
+            </v-list-item-content>
+          </v-list-item>
+          <v-list-item>
+            <v-list-item-content>
+              <v-list-item-title> Evidence Size: </v-list-item-title>
+              {{ taskDetails.evidence_size }} bytes
             </v-list-item-content>
           </v-list-item>
           <v-list-item>
@@ -133,7 +145,7 @@ export default {
           const downloadObj = window.URL.createObjectURL(new Blob([data]))
           const link = document.createElement('a')
           link.href = downloadObj
-          link.setAttribute('download', task_id + '.zip')
+          link.setAttribute('download', task_id + '.tgz')
           document.body.appendChild(link)
           link.click()
           link.remove()

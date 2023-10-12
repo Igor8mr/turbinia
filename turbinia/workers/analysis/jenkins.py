@@ -37,7 +37,7 @@ class JenkinsAnalysisTask(TurbiniaTask):
   TASK_CONFIG = {
       # This is the length of time in seconds that the collected passwords will
       # be bruteforced.
-      'bruteforce_timeout': 300
+      'bruteforce_timeout': 600
   }
 
   def run(self, evidence, result):
@@ -72,7 +72,7 @@ class JenkinsAnalysisTask(TurbiniaTask):
 
     jenkins_artifacts = []
     jenkins_re = re.compile(
-        r'^.*jenkins[^\/]*(\/home)?(\/users\/[^\/]+)*\/config\.xml$')
+        r'^.*?jenkins[^\/]*(\/home)?(\/users)?(\/.*?)\/config\.xml$')
     for collected_artifact in collected_artifacts:
       if re.match(jenkins_re, collected_artifact):
         jenkins_artifacts.append(collected_artifact)
@@ -180,13 +180,13 @@ class JenkinsAnalysisTask(TurbiniaTask):
 
     if not version:
       version = 'Unknown'
-    report.append(fmt.bullet('Jenkins version: {0:s}'.format(version)))
+    report.append(fmt.bullet(f'Jenkins version: {version:s}'))
 
     if weak_passwords:
       priority = Priority.CRITICAL
       summary = 'Jenkins analysis found potential issues'
       report.insert(0, fmt.heading4(fmt.bold(summary)))
-      line = '{0:n} weak password(s) found:'.format(len(weak_passwords))
+      line = f'{len(weak_passwords):n} weak password(s) found:'
       report.append(fmt.bullet(fmt.bold(line)))
       for password_hash, plaintext in weak_passwords:
         line = 'User "{0:s}" with password "{1:s}"'.format(

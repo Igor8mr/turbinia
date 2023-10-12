@@ -53,7 +53,7 @@ TMP_DIR = '/tmp'
 LOG_DIR = '/var/tmp'
 
 # Path to a lock file used for the worker tasks.
-LOCK_FILE = '%s/turbinia-worker.lock' % TMP_DIR
+LOCK_FILE = f'{TMP_DIR}/turbinia-worker.lock'
 
 # This folder is used to maintain the RESOURCE_FILE needed for resource tracking across
 # multiple workers on a given host. It is important that this folder is shared amongst
@@ -65,15 +65,15 @@ TMP_RESOURCE_DIR = '/var/run/lock'
 # If for example, you are running the workers within containers, be sure to map the
 # OUTPUT_DIR from the container to the host so that the workers are updating a single
 # resource file rather than individual state files within the containers.
-RESOURCE_FILE = '%s/turbinia-state.json' % TMP_RESOURCE_DIR
+RESOURCE_FILE = f'{TMP_RESOURCE_DIR}/turbinia-state.json'
 
 # Path to a resource state lock file used for locking changes to shared Evidence types.
 # Similar to RESOURCE_FILE, this should be a shared path amongst all workers on a given
 # host to properly lock the resource state file.
-RESOURCE_FILE_LOCK = '%s.lock' % RESOURCE_FILE
+RESOURCE_FILE_LOCK = f'{RESOURCE_FILE}.lock'
 
 # For Kubernetes infrastructure. Indicates whether a given pod is set to be deleted.
-SCALEDOWN_WORKER_FILE = '%s/turbinia-to-scaledown.lock' % TMP_DIR
+SCALEDOWN_WORKER_FILE = f'{TMP_DIR}/turbinia-to-scaledown.lock'
 
 # Time in seconds to sleep in task management loops
 SLEEP_TIME = 10
@@ -97,6 +97,10 @@ SHARED_FILESYSTEM = False
 # problems.
 DEBUG_TASKS = False
 
+# This indicates whether the server and worker version need to be the same.
+# Makes sense to set to False while developing.
+VERSION_CHECK = True
+
 # Directory keeping all eligible recipes
 RECIPE_FILE_DIR = None
 
@@ -118,6 +122,15 @@ API_ALLOWED_ORIGINS = ['http://localhost:8000']
 # Enable/Disable API authentication. This will determine whether the API server will
 # check for OAuth 2.0 bearer tokens in the 'Authorization' header.
 API_AUTHENTICATION_ENABLED = False
+
+# Chunk size in bytes for chunk reading when uploading evidences to server.
+API_UPLOAD_CHUNK_SIZE = 1024
+
+# Default path to where uploaded evidence will be stored on server.
+API_EVIDENCE_UPLOAD_DIR = '/evidence'
+
+# Max size in bytes for evidence uploaded to server.
+API_MAX_UPLOAD_SIZE = 10737418240
 
 # Path to Turbinia Web UI static files
 WEBUI_PATH = '/web'
@@ -301,16 +314,16 @@ REDIS_PORT = '6379'
 REDIS_DB = '0'
 
 # Method for communication between nodes
-CELERY_BROKER = 'redis://%s' % REDIS_HOST
+CELERY_BROKER = f'redis://{REDIS_HOST}'
 
 # Storage for task results/status
-CELERY_BACKEND = 'redis://%s' % REDIS_HOST
+CELERY_BACKEND = f'redis://{REDIS_HOST}'
 
 # Can be the same as CELERY_BROKER
 KOMBU_BROKER = CELERY_BROKER
 
 # Used to namespace communications.
-KOMBU_CHANNEL = '%s-kombu' % INSTANCE_ID
+KOMBU_CHANNEL = f'{INSTANCE_ID}-kombu'
 
 # Will messages be persistent and require acknowledgment?
 # http://docs.celeryproject.org/projects/kombu/en/4.0/reference/kombu.html#kombu.Connection.SimpleBuffer

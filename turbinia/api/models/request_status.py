@@ -28,6 +28,8 @@ log = logging.getLogger('turbinia:api_server:routes:request')
 class RequestStatus(BaseModel):
   """Represents a Turbinia request status object."""
   request_id: str = None
+  evidence_name: str = None
+  evidence_id: str = None
   tasks: List[Dict] = []
   reason: str = None
   requester: str = None
@@ -63,22 +65,51 @@ class RequestStatus(BaseModel):
         if current_request_id == request_id:
           self.tasks.append(task)
 
+    # Tries to get the evidence_name from the -l argument of the first task,
+    # which is the argument passed in the terminal to determine the evidence.
+    # If successful, sets the initial_start_time to None, if not, to the
+    # current time, so that it can be used later to determine the first started
+    # task and then get the evidence_name, as later tasks may have a different
+    # evidence name. There is a small chance of the first task having a
+    # different evidence_name, so getting it from arguments is prefered when
+    # they exist.
+    # todo(igormr): Save request information in redis to get the evidence_name
+    name_from_args = False
+    if tasks:
+      if tasks[0].get('all_args'):
+        arguments = tasks[0].get('all_args', 0).split()
+        for i in range(len(arguments) - 1):
+          if arguments[i] == '-l':
+            self.evidence_name = arguments[i + 1]
+            name_from_args = True
+            break
+
+    initial_start_time = datetime.datetime.now().strftime(
+        turbinia_config.DATETIME_FORMAT)
     for task in tasks:
       self.request_id = task.get('request_id')
       self.requester = task.get('requester')
       self.reason = task.get('reason')
       self.task_count = len(tasks)
       task_status = task.get('status')
+      # Gets the evidence_name from the first started task.
+      if name_from_args and task.get('evidence_name') == self.evidence_name:
+        self.evidence_id = task.get('evidence_id')
+      elif not name_from_args and task.get('start_time') and task.get(
+          'start_time') < initial_start_time:
+        initial_start_time = task.get('start_time')
+        self.evidence_name = task.get('evidence_name')
+        self.evidence_id = task.get('evidence_id')
       if isinstance(task.get('last_update'), datetime.datetime):
         task_last_update = datetime.datetime.timestamp(task.get('last_update'))
       else:
         task_last_update = task.get('last_update')
-
       if not self.last_task_update_time:
         self.last_task_update_time = task_last_update
       else:
         self.last_task_update_time = max(
             self.last_task_update_time, task_last_update)
+
       if task.get('successful'):
         self.successful_tasks += 1
       # 'successful' could be None or False, which means different things.

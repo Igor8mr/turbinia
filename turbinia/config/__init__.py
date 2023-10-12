@@ -60,6 +60,7 @@ REQUIRED_VARS = [
     'MOUNT_DIR_PREFIX',
     'SHARED_FILESYSTEM',
     'DEBUG_TASKS',
+    'VERSION_CHECK',
     'DEPENDENCIES',
     'DOCKER_ENABLED',
     'DISABLED_JOBS',
@@ -68,7 +69,10 @@ REQUIRED_VARS = [
     'API_SERVER_PORT',
     'API_ALLOWED_ORIGINS',
     'API_AUTHENTICATION_ENABLED',
-    'WEBUI_PATH',
+    'API_UPLOAD_CHUNK_SIZE',
+    'API_EVIDENCE_UPLOAD_DIR',
+    'API_MAX_UPLOAD_SIZE',
+    'WEBUI_PATH'
 ]
 
 # Optional config vars.  Some may be mandatory depending on the configuration
@@ -162,11 +166,11 @@ def LoadConfig(config_file=None):
   if config_file is None:
     raise TurbiniaException('No config files found')
 
-  log.debug('Loading config from {0:s}'.format(config_file))
+  log.debug(f'Loading config from {config_file:s}')
   # Warn about using fallback source config, but it's currently necessary for
   # tests. See issue #446.
   if 'turbinia_config_tmpl' in config_file:
-    log.warning('Using fallback source config. {0:s}'.format(CONFIG_MSG))
+    log.warning(f'Using fallback source config. {CONFIG_MSG:s}')
   try:
     config_loader = importlib.machinery.SourceFileLoader('config', config_file)
     config_spec = importlib.util.spec_from_loader(
@@ -174,9 +178,7 @@ def LoadConfig(config_file=None):
     _config = importlib.util.module_from_spec(config_spec)
     config_loader.exec_module(_config)
   except IOError as exception:
-    message = (
-        'Could not load config file {0:s}: {1!s}'.format(
-            config_file, exception))
+    message = (f'Could not load config file {config_file:s}: {exception!s}')
     log.error(message)
     raise TurbiniaException(message)
 
@@ -189,8 +191,7 @@ def LoadConfig(config_file=None):
     os.environ['GOOGLE_CLOUD_PROJECT'] = _config.TURBINIA_PROJECT
 
   CONFIG = _config
-  log.debug(
-      'Returning parsed config loaded from {0:s}'.format(CONFIG.configSource))
+  log.debug(f'Returning parsed config loaded from {CONFIG.configSource:s}')
   return _config
 
 
@@ -205,17 +206,16 @@ def ValidateAndSetConfig(_config):
     if not hasattr(_config, var):
       if var in OPTIONAL_VARS:
         log.debug(
-            'Setting non-existent but optional config variable {0:s} to '
-            'None'.format(var))
+            f'Setting non-existent but optional config variable {var:s} to None'
+        )
         empty_value = True
       else:
         raise TurbiniaException(
-            'Required config attribute {0:s}:{1:s} not in config'.format(
-                _config.configSource, var))
+            f'Required config attribute {_config.configSource:s}:{var:s} not in config'
+        )
     if var in REQUIRED_VARS and getattr(_config, var) is None:
       raise TurbiniaException(
-          'Config attribute {0:s}:{1:s} is not set'.format(
-              _config.configSource, var))
+          f'Config attribute {_config.configSource:s}:{var:s} is not set')
 
     # Set the attribute in the current module
     if empty_value:
@@ -243,8 +243,8 @@ def ParseDependencies():
       dependencies[job]['timeout'] = values.get('timeout')
   except (KeyError, TypeError) as exception:
     raise TurbiniaException(
-        'An issue has occurred while parsing the '
-        'dependency config: {0!s}'.format(exception))
+        f'An issue has occurred while parsing the dependency config: {exception!s}'
+    )
   return dependencies
 
 
