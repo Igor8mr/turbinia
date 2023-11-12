@@ -2,7 +2,6 @@ version: "3.2"
 services:
     redis:
         image: "redis:alpine"
-
         command: redis-server
         # This will *only* expose it to the docker network, not to the host.
         # See https://docs.docker.com/compose/compose-file/compose-file-v3/#expose
@@ -59,10 +58,9 @@ services:
             - TURBINIA_EXTRA_ARGS=${TURBINIA_EXTRA_ARGS}
     # Uncomment below in case you want to run a second worker on the same host.
     #  turbinia-worker2:
-    #     #image: "turbinia-worker-dev" # Use this for local development and comment out below line
+    #     image: "turbinia-worker-dev" # Use this for local development and comment out below line
     #     image: "us-docker.pkg.dev/osdfir-registry/turbinia/release/turbinia-worker:latest" # Latest stable
     #     container_name: turbinia-worker2
-    #     privileged: true
 
     #     volumes:
     #      - $PWD/evidence:/evidence
@@ -71,3 +69,4 @@ services:
     #     environment:
     #      - LC_ALL=C.UTF-8
     #      - LANG=C.UTF-8
+    #      - TURBINIA_EXTRA_ARGS=${TURBINIA_EXTRA_ARGS}
